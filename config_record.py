@@ -9,6 +9,14 @@ def config_write():
     config['websocket_message'] = {'ip': '192.168.229.183',
                                    'port': '9090'}
     config['personal_msg'] = {'battery': 0}
+    config['param'] = {'max_vel_x': 0.0,
+                       'min_vel_x': 0.0,
+                       'max_vel_trans': 0.0,
+                       'min_vel_trans': 0.0,
+                       'max_vel_theta': 0.0,
+                       'min_vel_theta': 0.0,
+                       'sim_time': 0.0,
+                       'inflation_radius': 0.0}
     with open('config.ini', 'w') as f:
         config.write(f)
 

@@ -1,10 +1,13 @@
 import roslibpy
 import roslibpy.tf as tf
+import roslibpy.actionlib
 from time import sleep
 import sys
 import base64
 import numpy as np
 import cv2
+from roslibpy import Param
+
 import config_record as cr
 from robot_visualizer import Ui_robot_visualizer
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox, QWidget, QInputDialog, QLineEdit
@@ -99,7 +102,7 @@ class DrawPaint(QWidget):
                 paint.setPen(Qt.green)
                 for path in self.path_list:
                     paint.drawPoint(QPointF(path['x'] / self.resolution + self.map_axis_x + self.point.x(),
-                                    path['y'] / self.resolution + self.map_axis_y + self.point.y()))
+                                            path['y'] / self.resolution + self.map_axis_y + self.point.y()))
         if not self.paint_move_flag or self.position_draw_flag:
             self.draw_arrow(self.arrow_start_pos / self.scale, self.arrow_end_pos / self.scale, paint, self.pen_color)
         paint.setPen(Qt.red)
@@ -135,9 +138,10 @@ class DrawPaint(QWidget):
                 # self.repaint()
             elif self.right_click:
                 self.label.move(e.pos().x() + 20, e.pos().y() - 20)
-                self.label.setText('x = ' + str(round((e.pos().x() / self.scale - self.point.x() - self.map_axis_x) / 20.0, 3)) +
-                                   '\n' + 'y = ' + str(
-                    round((e.pos().y() / self.scale - self.point.y() - self.map_axis_y) / 20.0, 3)))
+                self.label.setText(
+                    'x = ' + str(round((e.pos().x() / self.scale - self.point.x() - self.map_axis_x) / 20.0, 3)) +
+                    '\n' + 'y = ' + str(
+                        round((e.pos().y() / self.scale - self.point.y() - self.map_axis_y) / 20.0, 3)))
         else:
             self.arrow_end_pos = e.pos()
             self.update()
@@ -155,9 +159,10 @@ class DrawPaint(QWidget):
             elif e.button() == Qt.RightButton:
                 self.right_click = True
                 self.label.move(e.pos().x() + 20, e.pos().y() - 20)
-                self.label.setText('x = ' + str(round((e.pos().x() / self.scale - self.point.x() - self.map_axis_x) / 20.0, 3)) +
-                                   '\n' + 'y = ' + str(
-                    round((e.pos().y() / self.scale - self.point.y() - self.map_axis_y) / 20.0, 3)))
+                self.label.setText(
+                    'x = ' + str(round((e.pos().x() / self.scale - self.point.x() - self.map_axis_x) / 20.0, 3)) +
+                    '\n' + 'y = ' + str(
+                        round((e.pos().y() / self.scale - self.point.y() - self.map_axis_y) / 20.0, 3)))
                 self.label.show()
         else:
             self.arrow_start_pos = e.pos()
@@ -217,12 +222,13 @@ class robot_display(QMainWindow, Ui_robot_visualizer):
         self.groupBox_control.setEnabled(False)
         self.groupBox_coordinate.setVisible(False)
         self.groupBox_data_reset.setVisible(False)
-        self.lineEdit_px.setText('1.638')
-        self.lineEdit_py.setText('-0.658')
-        self.lineEdit_ox.setText('-0.002')
-        self.lineEdit_oy.setText('0.003')
-        self.lineEdit_oz.setText('-0.701')
-        self.lineEdit_ow.setText('0.714')
+        self.lineEdit_px.setText('0.3')
+        self.lineEdit_py.setText('0.0')
+        self.lineEdit_ox.setText('0.0')
+        self.lineEdit_oy.setText('0.0')
+        self.lineEdit_oz.setText('1.0')
+        self.lineEdit_ow.setText('0.0')
+        self.wheel_flag = True
         self.pub_flag = True
         self.connect_flag = 0
         self.linear = 0.0
@@ -244,20 +250,34 @@ class robot_display(QMainWindow, Ui_robot_visualizer):
         self.stop_status = roslibpy.Topic(self.client, '/stop_status', 'std_msgs/String')
         self.send_goal = roslibpy.Topic(self.client, '/move_base_simple/goal', 'geometry_msgs/PoseStamped')
         self.send_pose_2d = roslibpy.Topic(self.client, '/initialpose', 'geometry_msgs/PoseWithCovarianceStamped')
+        self.open_door = roslibpy.Topic(self.client, '/rt_OpenDoor', 'std_msgs/String')
+        self.wheel_control = roslibpy.Topic(self.client, '/rt_engine_status', 'std_msgs/Int8')
 
         # service
         self.battery_srv = roslibpy.Service(self.client, 'robot_check_srv', 'serial_demo/RobotSelfCheck')
-        self.go_home_srv = roslibpy.Service(self.client, 'robot_go_home', 'serial_demo/GoHome')
+        self.go_home_srv = roslibpy.Service(self.client, 'robot_go_home', 'robot_control/GoHome')
+        self.change_map_srv = roslibpy.Service(self.client, '/rs_change_map', 'robot_control/ChangeMap')
 
         # TF
         self.tf_client = tf.TFClient(self.client, '/map', angular_threshold=0.3)
+
+        # param
+        self.param_max_vel_x = roslibpy.Param(self.client, '/move_base/DWAPlannerROS/max_vel_x')
+        self.param_min_vel_x = roslibpy.Param(self.client, '/move_base/DWAPlannerROS/min_vel_x')
+        self.param_max_vel_trans = roslibpy.Param(self.client, '/move_base/DWAPlannerROS/max_vel_trans')
+        self.param_min_vel_trans = roslibpy.Param(self.client, '/move_base/DWAPlannerROS/min_vel_trans')
+        self.param_max_vel_theta = roslibpy.Param(self.client, '/move_base/DWAPlannerROS/max_vel_theta')
+        self.param_min_vel_theta = roslibpy.Param(self.client, '/move_base/DWAPlannerROS/min_vel_theta')
+        self.param_sim_time = roslibpy.Param(self.client, '/move_base/DWAPlannerROS/sim_time')
+        self.param_inflation_radius = roslibpy.Param(self.client, '/move_base/local_costmap/inflation_radius')
+
         self.pushButton_go_home.setEnabled(int(cr.config_read(3)))
         self.time_srv = QTimer()
         self.reset_timer = QTimer()
         self.widget_map1 = DrawPaint()
         self.connect_t = Thread_1(self.connect_robot)
         self.srv_connect = Thread_1(self.robot_go_home_callback)
-        self.gridLayout_5.addWidget(self.widget_map1, 1, 0, 2, 7)
+        self.gridLayout_5.addWidget(self.widget_map1, 1, 0, 2, 9)
         with open('message.txt', 'r', encoding='utf-8') as f:
             text = f.read()
             self.textBrowser_notice.setText(text)
@@ -288,7 +308,25 @@ class robot_display(QMainWindow, Ui_robot_visualizer):
         self.pushButton_reset_path.clicked.connect(self.path_reset)
         self.pushButton_2d_pose.clicked.connect(self.pose_2d_callback)
         self.pushButton_2d_goal.clicked.connect(self.goal_2d_callback)
+        self.pushButton_lock.clicked.connect(self.door_lock)
+        self.pushButton_wheel.clicked.connect(self.wheel_status)
+        self.pushButton_param_refrash.clicked.connect(self.get_ros_param)
+        self.pushButton_param_set.clicked.connect(self.set_ros_param)
+        self.pushButton_param_save.clicked.connect(self.save_ros_param)
+        self.pushButton_change12.clicked.connect(self.map_change_12)
+        self.pushButton_change13.clicked.connect(self.map_change_13)
+
         self.horizontalSlider_speed.valueChanged.connect(self.speed_set)
+
+        self.horizontalSlider_max_vel_x.valueChanged.connect(self.param_label_set)
+        self.horizontalSlider_min_vel_x.valueChanged.connect(self.param_label_set)
+        self.horizontalSlider_max_vel_trans.valueChanged.connect(self.param_label_set)
+        self.horizontalSlider_min_vel_trans.valueChanged.connect(self.param_label_set)
+        self.horizontalSlider_max_vel_theta.valueChanged.connect(self.param_label_set)
+        self.horizontalSlider_min_vel_theta.valueChanged.connect(self.param_label_set)
+        self.horizontalSlider_sim_time.valueChanged.connect(self.param_label_set)
+        self.horizontalSlider_inflation_radius.valueChanged.connect(self.param_label_set)
+
         self.time_srv.timeout.connect(self.battery_srv_callback)
         self.stop_status.subscribe(self.stop_go_home)
         self.comboBox_points.currentIndexChanged.connect(self.coordinate_show_callback)
@@ -323,13 +361,26 @@ class robot_display(QMainWindow, Ui_robot_visualizer):
         self.stop_status = roslibpy.Topic(self.client, '/stop_status', 'std_msgs/String')
         self.send_goal = roslibpy.Topic(self.client, '/move_base_simple/goal', 'geometry_msgs/PoseStamped')
         self.send_pose_2d = roslibpy.Topic(self.client, '/initialpose', 'geometry_msgs/PoseWithCovarianceStamped')
+        self.open_door = roslibpy.Topic(self.client, '/rt_OpenDoor', 'std_msgs/String')
+        self.wheel_control = roslibpy.Topic(self.client, '/rt_engine_status', 'std_msgs/Int8')
 
         # service
         self.battery_srv = roslibpy.Service(self.client, 'robot_check_srv', 'serial_demo/RobotSelfCheck')
-        self.go_home_srv = roslibpy.Service(self.client, 'robot_go_home', 'serial_demo/GoHome')
+        self.go_home_srv = roslibpy.Service(self.client, 'robot_go_home', 'robot_control/GoHome')
+        self.change_map_srv = roslibpy.Service(self.client, '/rs_change_map', 'robot_control/ChangeMap')
 
         # TF
         self.tf_client = tf.TFClient(self.client, '/map', angular_threshold=0.3)
+
+        # param
+        self.param_max_vel_x = roslibpy.Param(self.client, '/move_base/DWAPlannerROS/max_vel_x')
+        self.param_min_vel_x = roslibpy.Param(self.client, '/move_base/DWAPlannerROS/min_vel_x')
+        self.param_max_vel_trans = roslibpy.Param(self.client, '/move_base/DWAPlannerROS/max_vel_trans')
+        self.param_min_vel_trans = roslibpy.Param(self.client, '/move_base/DWAPlannerROS/min_vel_trans')
+        self.param_max_vel_theta = roslibpy.Param(self.client, '/move_base/DWAPlannerROS/max_vel_theta')
+        self.param_min_vel_theta = roslibpy.Param(self.client, '/move_base/DWAPlannerROS/min_vel_theta')
+        self.param_sim_time = roslibpy.Param(self.client, '/move_base/DWAPlannerROS/sim_time')
+        self.param_inflation_radius = roslibpy.Param(self.client, '/move_base/local_costmap/inflation_radius')
 
         # config_write
         cr.config.set('websocket_message', 'ip', self.lineEdit_ip.text())
@@ -479,7 +530,7 @@ class robot_display(QMainWindow, Ui_robot_visualizer):
     def robot_go_home_callback(self):
         self.pushButton_go_home.setText('回充中...')
         request_go_home = roslibpy.ServiceRequest()
-        request_go_home.data = {'command': 'go',
+        request_go_home.data = {'command': 'set',
                                 'origin': {'position': {'x': float(self.lineEdit_px.text()),
                                                         'y': float(self.lineEdit_py.text())},
                                            'orientation': {'x': float(self.lineEdit_ox.text()),
@@ -636,6 +687,81 @@ class robot_display(QMainWindow, Ui_robot_visualizer):
             QMessageBox.information(self, '信息', '管理员密码验证成功!')
         else:
             QMessageBox.warning(self, '警告', '管理员密码验证失败!')
+
+    def door_lock(self):
+        self.open_door.publish(roslibpy.Message({'data': 'open'}))
+
+    def wheel_status(self):
+        if self.wheel_flag:
+            self.wheel_control.publish(roslibpy.Message({'data': 0}))
+            self.pushButton_wheel.setText('运行')
+            self.wheel_flag = False
+        else:
+            self.wheel_control.publish(roslibpy.Message({'data': 2}))
+            self.pushButton_wheel.setText('滑行')
+            self.wheel_flag = True
+
+    def get_ros_param(self):
+        self.horizontalSlider_max_vel_x.setValue(int(self.param_max_vel_x.get() * 100))
+        self.horizontalSlider_min_vel_x.setValue(int(self.param_min_vel_x.get() * 100))
+        self.horizontalSlider_max_vel_trans.setValue(int(self.param_max_vel_trans.get() * 100))
+        self.horizontalSlider_min_vel_trans.setValue(int(self.param_min_vel_trans.get() * 100))
+        self.horizontalSlider_max_vel_theta.setValue(int(self.param_max_vel_theta.get() * 100))
+        self.horizontalSlider_min_vel_theta.setValue(int(self.param_min_vel_theta.get() * 100))
+        self.horizontalSlider_sim_time.setValue(int(self.param_sim_time.get() * 10))
+        self.horizontalSlider_inflation_radius.setValue(int(self.param_inflation_radius.get() * 10))
+        self.pushButton_param_set.setEnabled(True)
+        self.pushButton_param_save.setEnabled(True)
+        QMessageBox.information(self, '消息', '已成功获取参数')
+
+    def set_ros_param(self):
+        self.param_max_vel_x.set(float(self.label_max_vel_x.text()))
+        self.param_min_vel_x.set(float(self.label_min_vel_x.text()))
+        self.param_max_vel_trans.set(float(self.label_max_vel_trans.text()))
+        self.param_min_vel_trans.set(float(self.label_max_vel_trans.text()))
+        self.param_max_vel_theta.set(float(self.label_max_vel_theta.text()))
+        self.param_min_vel_theta.set(float(self.label_max_vel_theta.text()))
+        self.param_sim_time.set(float(self.label_sim_time.text()))
+        self.param_inflation_radius.set(float(self.label_inflation_radius.text()))
+        QMessageBox.information(self, '消息', '设置完成')
+
+    def param_label_set(self):
+        self.label_max_vel_x.setText(str(self.horizontalSlider_max_vel_x.value() / 100))
+        self.label_min_vel_x.setText(str(self.horizontalSlider_min_vel_x.value() / 100))
+        self.label_max_vel_trans.setText(str(self.horizontalSlider_max_vel_trans.value() / 100))
+        self.label_min_vel_trans.setText(str(self.horizontalSlider_min_vel_trans.value() / 100))
+        self.label_max_vel_theta.setText(str(self.horizontalSlider_max_vel_theta.value() / 100))
+        self.label_min_vel_theta.setText(str(self.horizontalSlider_min_vel_theta.value() / 100))
+        self.label_sim_time.setText(str(self.horizontalSlider_sim_time.value() / 10))
+        self.label_inflation_radius.setText(str(self.horizontalSlider_inflation_radius.value() / 10))
+
+    def save_ros_param(self):
+        cr.config.set('param', 'max_vel_x', (self.label_max_vel_x.text()))
+        cr.config.set('param', 'min_vel_x', (self.label_min_vel_x.text()))
+        cr.config.set('param', 'max_vel_trans', (self.label_max_vel_trans.text()))
+        cr.config.set('param', 'min_vel_trans', (self.label_min_vel_trans.text()))
+        cr.config.set('param', 'max_vel_theta', (self.label_max_vel_theta.text()))
+        cr.config.set('param', 'min_vel_theta', (self.label_min_vel_theta.text()))
+        cr.config.set('param', 'sim_time', (self.label_sim_time.text()))
+        cr.config.set('param', 'inflation_radius', (self.label_inflation_radius.text()))
+        cr.config.write(open('config.ini', 'w'))
+        QMessageBox.information(self, '消息', '数据已保存到本地')
+
+    def map_change_12(self):
+        data = roslibpy.ServiceRequest()
+        data.data = {'change': 2}
+        result = self.change_map_srv.call(data)
+        if result['result'] == 1:
+            self.log_show('已经切换12层地图')
+            QMessageBox.information(self, '消息', '成功切换12层地图，请手动重定位!')
+
+    def map_change_13(self):
+        data = roslibpy.ServiceRequest()
+        data.data = {'change': 1}
+        result = self.change_map_srv.call(data)
+        if result['result'] == 1:
+            self.log_show('已经切换13层地图')
+            QMessageBox.information(self, '消息', '成功切换13层地图，请手动重定位!')
 
     def test(self):
         import pyqtgraph as pg
